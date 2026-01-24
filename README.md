@@ -1,5 +1,5 @@
 # k8s-templator
-# new_app — Kubernetes app bootstrap (go-template + kustomize)
+## Kubernetes app bootstrap (go-template + kustomize + deploy with argocd)
 
 This repo bootstraps a basic Kubernetes “web app” skeleton from a few templates:
 
@@ -11,6 +11,49 @@ This repo bootstraps a basic Kubernetes “web app” skeleton from a few templa
 
 The goal is to quickly scaffold a new app with sane defaults: health probes, resource limits, envFrom config, etc.
 
+## USAGE
+** Use make clean before building again !! **
+the default image name is build like:
+  - FINAL_NAME              ?= $(REGISTRY_HOST)/$(NAMESPACE)/$(APP_NAME):$(ENV)-latest
+---
+### Config
+in Makefile:
+ - For every app aad these mappings 
+```
+# App Metadata: Port and Source Code Repo, make these for every app in APPS list
+app-1_PORT            := $(SVC_PORT)
+app-1_REPO            := $(REPO_URL)
+app-1_CFG_REPO        := $(CFG_REPO_URL)
+
+app-n_PORT            := $(SVC_PORT)
+app-n_REPO            := $(REPO_URL)
+app-n_CFG_REPO        := $(CFG_REPO_URL)
+
+```
+
+### source env vars:
+  - FINAL_NAME              <<< repo/ns/image:tag
+  - APP_NAME
+  - SVC_PORT
+  - NAMESPACE
+  - K8S_CTX <<<< this sets the cluster to talk too in multi cluster setup
+  - REPO_URL
+  - DRY_RUN << default: dry-run=client kubectl option
+    - you can set other kubectl options here examples :
+      - DRY_RUN='-o yaml' >> show the rendered yamls
+      - DRY_RUN=''  >> this will remove dry run and deploy to cluster
+  - CFG_REPO_URL  >> target namesapce config repo    
+   
+---
+#### Examples
+- ##### local build:
+   - make clean build-all
+- ##### remote push:
+   - push_cfg   <<< this will run all steps:
+     1. build the yamls and kustomize the images, configmaps etc
+     2. clone the config repo
+     3. rsync the APP dir and rsync the argocd dir to remote-dir
+     4. pushes the code to the repo
 ---
 
 ## Requirements
@@ -76,3 +119,54 @@ Vault key: /hetarchief-v3/client-int
 - run make bootsstrap to create the yamls
 
 - run make int , to deploy int (dry run for now)
+
+
+## List argocd apps in a given CONTEXT
+use K8S_CTX=azure-aks-contextname to connect to the cluster 
+
+``` 
+k8s-templatar_py-web $ kubectl config get-contexts 
+CURRENT   NAME                                                                                CLUSTER                                               AUTHINFO                                                                      NAMESPACE
+*         aks-qas-auto                                                                        aks-qas-auto                                          clusterUser_rg-qas-eunorth_aks-qas-auto                                       argocd
+          aks-tst                                                                             aks-tst                                               clusterUser_rg-hetarchief-tst_aks-tst                                         argocd
+          ci-cd/c113-e-private-eu-de-containers-cloud-ibm-com:30227/IAM#tina.cochet@viaa.be   c113-e-private-eu-de-containers-cloud-ibm-com:30227   IAM#tina.cochet@viaa.be/c113-e-private-eu-de-containers-cloud-ibm-com:30227   ci-cd
+          int-admin                                                                           int-admin-cluster                                     int-admin-user                                                                meemoo-infra
+          int-bot                                                                             int-bot-cluster                                       int-bot-user                                                                  meemoo-infra
+          int-helm                                                                            int-helm-cluster                                      int-helm-user                                                                 meemoo-infra
+          kind-dev                                                                            kind-dev                                              kind-dev                                                                      
+          kind-kind                                                                           kind-kind                                             kind-kind                                                                     hetarchief-v3
+          mig_source                                                                          mig_source                                            mig_source                                                                    ci-cd
+          mig_target                                                                          mig_target                                            mig_target
+
+_______________________________________________________________________________________________________________________________________________
+
+k8s-templatar_py-web $ K8S_CTX=aks-tst make test
+Switched to context "aks-tst".
+namespace/playground unchanged
+Context "aks-tst" modified.
+kubectl config set-context --current --namespace argocd
+Context "aks-tst" modified.
+bash -c 'argocd login --core'
+Context 'kubernetes' updated
+NAME                             CLUSTER                         NAMESPACE      PROJECT  STATUS     HEALTH    SYNCPOLICY  CONDITIONS                                                 REPO                                                         PATH                           TARGET
+argocd/demo1                     https://kubernetes.default.svc  meemoo-infra   default  OutOfSync  Degraded  Auto        OrphanedResourceWarning,RepeatedResourceWarning,SyncError  https://github.com/viaacode/argoCD-demo-app.git              k8s-kustomize/                 HEAD
+argocd/hetarchief-v3-client-qas  https://kubernetes.default.svc  hetarchief-v3  default  Synced     Degraded  Auto-Prune  OrphanedResourceWarning                                    https://github.com/viaacode/hetarchief-v3_k8s-resources.git  kustomize/client/overlays/qas  main
+argocd/hetarchief-v3-hasura-qas  https://kubernetes.default.svc  hetarchief-v3  default  Synced     Degraded  Auto-Prune  OrphanedResourceWarning                                    https://github.com/viaacode/hetarchief-v3_k8s-resources.git  kustomize/hasura/overlays/qas  main
+argocd/hetarchief-v3-proxy-qas   https://kubernetes.default.svc  hetarchief-v3  default  Synced     Degraded  Auto-Prune  OrphanedResourceWarning                                    https://github.com/viaacode/hetarchief-v3_k8s-resources.git  kustomize/proxy/overlays/qas   main
+argocd/hetarchief-v3-qas         https://kubernetes.default.svc  argocd         default  Synced     Healthy   Auto-Prune  OrphanedResourceWarning                                    https://github.com/viaacode/hetarchief-v3_k8s-resources.git  argocd/qas                     main
+argocd/playground-int            https://kubernetes.default.svc  argocd         default  Unknown    Healthy   Auto-Prune  ComparisonError,OrphanedResourceWarning                    https://github.com/viaacode/playground_k8s-resources.git     argocd/int                     main
+argocd/playground-qas            https://kubernetes.default.svc  argocd         default  Unknown    Healthy   Auto-Prune  ComparisonError,OrphanedResourceWarning                    https://github.com/viaacode/playground_k8s-resources.git     argocd/qas                     main
+argocd/vault                     https://kubernetes.default.svc  meemoo-infra   default  OutOfSync  Healthy   Manual      OrphanedResourceWarning                                    https://openbao.github.io/openbao-helm                                                      0.18.4
+tina  k8s-templatar_py-web $ K8S_CTX=aks-qas-auto make test
+Switched to context "aks-qas-auto".
+namespace/playground unchanged
+Context "aks-qas-auto" modified.
+kubectl config set-context --current --namespace argocd
+Context "aks-qas-auto" modified.
+bash -c 'argocd login --core'
+Context 'kubernetes' updated
+NAME                   CLUSTER                         NAMESPACE  PROJECT  STATUS   HEALTH   SYNCPOLICY  CONDITIONS       REPO                                                      PATH        TARGET
+argocd/playground-int  https://kubernetes.default.svc  argocd     default  Unknown  Healthy  Auto-Prune  ComparisonError  https://github.com/viaacode/playground_k8s-resources.git  argocd/int  main
+argocd/playground-qas  https://kubernetes.default.svc  argocd     default  Unknown  Healthy  Auto-Prune  ComparisonError  https://github.com/viaacode/playground_k8s-resources.git  argocd/qas  main
+```
+
