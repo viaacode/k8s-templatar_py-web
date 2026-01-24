@@ -1,0 +1,44 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: playground
+
+resources:
+- ../../base
+- cicd-helloworld-example-prd-externalsecret.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+- envs:
+  - cicd-helloworld-example-config-prd.env
+  name: cicd-helloworld-example-config
+
+namePrefix: playground-
+nameSuffix: -prd
+
+labels:
+- includeSelectors: true
+  pairs:
+    env: prd
+
+
+
+patches:
+- path: patch-replicas.yaml
+  target:
+    group: apps
+    kind: Deployment
+    name: .*
+    version: v1
+- path: patch-resources.yaml
+  target:
+    group: apps
+    kind: Deployment
+    name: .*
+    version: v1
+images:
+- name: meeregistrymoo.azurecr.io/playground/cicd-helloworld-example:devel
+  newName: meeregistrymoo.azurecr.io/playground/cicd-helloworld-example
+  newTag: prd

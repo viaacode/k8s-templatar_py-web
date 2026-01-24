@@ -1,0 +1,52 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: playground
+
+resources:
+  - ../../base
+  - cicd-helloworld-example-int-externalsecret.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: cicd-helloworld-example-config        # matches <app>-config in envFrom
+    envs:
+      - cicd-helloworld-example-config-int.env
+
+namePrefix: playground-
+nameSuffix: -int
+
+labels:
+- includeSelectors: true
+  pairs:
+    env: int
+
+
+patches:
+  - path: patch-replicas.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: ".*"
+
+  - path: patch-resources.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: ".*"
+
+#patches:
+#- path: patch-replica.yaml
+#  target:
+#    kind: Deployment
+#    name: playground-cicd-helloworld-example-int
+
+
+#images:
+#- name: meeregistrymoo.azurecr.io/playground/cicd-helloworld-example:devel
+#  newName: meeregistrymoo.azurecr.io/playground/cicd-helloworld-example
+#  newTag: int
