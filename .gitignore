@@ -2,3 +2,4 @@ source_envs.sh
 **.pem
 **.crt
 **.env
+**.ca
