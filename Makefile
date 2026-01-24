@@ -4,6 +4,7 @@
 #
 # --- Global settings --------------------------------------------------------
 K8S_CTX ?= aks-qas-auto
+AKS_CTX ?= $(K8S_CTX)
 # Export these so sub-makefiles can see them
 export K8S_CTX
 export LOCAL_DOMAIN 	:= az-$${ENV}.local
@@ -242,7 +243,7 @@ int: K8S_CTX=aks-tst
 prd: set-ns build-all lint argocd-deploy-root-env
 
 
-argocd_login:
+argocd_login: set-ns
 	kubectl config set-context --current --namespace argocd
 	bash -c 'argocd login --core'
 
