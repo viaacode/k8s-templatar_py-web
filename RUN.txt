@@ -1,0 +1,1 @@
+K8S_CTX=aks-qa-auto make clean qas CFG_AUTH=https CFG_GIT_USERNAME=violetina cfg-bootstrap  cfg-push 

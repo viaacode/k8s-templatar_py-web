@@ -2,6 +2,80 @@
 # Use deploy for you ci app to set image tag
 # Use DRY_RUN='' to disable dry run during deploy , use DRY_RUN='-o yaml' to view yamls that are created
 #
+#
+#
+###############################################################################
+# --- ArgoCD / config repo bootstrap -----------------------------------------
+ARGOCD_NS            ?= argocd
+
+# Choose auth mode: https or ssh
+CFG_AUTH             := https
+
+# HTTPS auth vars (CFG_AUTH=https)
+CFG_GIT_USERNAME     ?= $${GIT_USER}
+CFG_GIT_TOKEN        ?= $${GIT_PASSWORD}
+
+# SSH auth vars (CFG_AUTH=ssh)
+CFG_REPO_SSH_URL     ?=   # e.g. git@github.com:org/repo.git
+CFG_GIT_SSH_KEY_FILE ?=   # path to deploy key file
+
+
+
+.PHONY: cfg-bootstrap cfg-sync cfg-push argocd-bootstrap argocd-apply-projects argocd-apply-repo-creds
+
+cfg-bootstrap: clone_cfg cfg-sync cfg-push
+
+# Sync local generated output into the config repo working tree
+cfg-sync:
+	@echo "__syncing generated manifests into config repo__"
+	@mkdir -p $(REMOTE_CFG_DIR)/kustomize
+	@mkdir -p $(REMOTE_CFG_DIR)/argocd/applications
+	@mkdir -p $(REMOTE_CFG_DIR)/argocd/projects
+	@mkdir -p $(REMOTE_CFG_DIR)/apps
+
+	# kustomize overlays/bases
+	@rsync -va --delete k8s-resources/kustomize/ $(REMOTE_CFG_DIR)/kustomize/
+
+	# argo applications (your generated root/child apps)
+	@rsync -va --delete k8s-resources/argocd/ $(REMOTE_CFG_DIR)/argocd/applications/
+
+	@echo "__done syncing__"
+
+cfg-push:
+	@echo "__pushing config repo__"
+	@cd $(REMOTE_CFG_DIR) && \
+	  git add . && \
+	  (git diff --cached --quiet || git commit -m "Auto commit templatar") && \
+	  git push
+
+# --- ArgoCD bootstrap: create repo creds + projects + (optionally) apply root-app
+argocd-bootstrap: set-ns argocd-apply-repo-creds argocd-apply-projects argocd-deploy-root-env
+
+argocd-apply-projects:
+	@echo "__applying ArgoCD projects__"
+	@for e in $(ENVS); do \
+	  ENV=$$e ARGOCD_NS=$(ARGOCD_NS) envsubst < argocd-project-tmpl.yaml | kubectl apply -f - ; \
+	done
+
+argocd-apply-repo-creds:
+	@echo "__applying ArgoCD config-repo credentials (CFG_AUTH=$(CFG_AUTH))__"
+ifeq ($(CFG_AUTH),https)
+	@ARGOCD_NS=$(ARGOCD_NS) CFG_GIT_USERNAME=$(CFG_GIT_USERNAME) CFG_GIT_TOKEN=$(CFG_GIT_TOKEN) envsubst < argocd-repo-https-secret-tmpl.yaml | kubectl apply -f -
+else ifeq ($(CFG_AUTH),ssh)
+	@if [ -z "$(CFG_GIT_SSH_KEY_FILE)" ]; then echo "CFG_GIT_SSH_KEY_FILE is required for CFG_AUTH=ssh"; exit 2; fi
+	@export CFG_GIT_SSH_KEY_INDENTED="$$(sed 's/^/    /' $(CFG_GIT_SSH_KEY_FILE))" ; \
+	ARGOCD_NS=$(ARGOCD_NS) CFG_GIT_SSH_KEY_INDENTED="$$CFG_GIT_SSH_KEY_INDENTED" envsubst < argocd-repo-ssh-secret-tmpl.yaml | kubectl apply -f -
+else
+	@echo "Unknown CFG_AUTH: $(CFG_AUTH) (use https or ssh)"; exit 2
+endif
+
+
+
+
+
+
+
+
 # --- Global settings --------------------------------------------------------
 K8S_CTX ?= aks-qas-auto
 AKS_CTX ?= $(K8S_CTX)
@@ -22,7 +96,7 @@ NAMESPACE     		?= meemoo-infra
 ENVS          		:= int qas prd
 REGISTRY_HOST 		?= meeregistrymoo.azurecr.io
 
-FINAL_NAME              ?= REGISTRY_HOST/$(NAMESPACE)/$(APP_NAME):$(ENV)-latest
+FINAL_NAME              ?= $(REGISTRY_HOST)/$(NAMESPACE)/$(APP_NAME):$(ENV)-latest
 
 
 export ENVS REGISTRY_HOST FINAL_NAME APP_NAME SVC_PORT
@@ -231,11 +305,14 @@ int: ENV=int
 int: K8S_CTX=aks-tst
 int: set-ns build-all lint argocd-deploy-root-env
 
+
+
+#######################
 qas: ENV=qas
 qas: K8S_CTX=aks-qas-auto
-qas: set-ns build-all lint argocd-deploy-root-env
+qas: set-ns build-all kustomize_image lint argocd-deploy-root-env
 
-
+#############
 #qas: set-ns clean build-all lint argocd-deploy-root-env
 
 prd: ENV=prd
