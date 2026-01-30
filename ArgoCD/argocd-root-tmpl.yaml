@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: ${CFG_REPO_URL}
     targetRevision: main
-    path: argocd/${ENV} # Watches a specific env folder
+    path: kustumize/${APP_NAME}/overlays/${ENV} # Watches a specific env folder
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

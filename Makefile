@@ -1,10 +1,3 @@
-## ___________________Usage___________________
-# Use deploy for you ci app to set image tag
-# Use DRY_RUN='' to disable dry run during deploy , use DRY_RUN='-o yaml' to view yamls that are created
-#
-#
-#
-###############################################################################
 # --- ArgoCD / config repo bootstrap -----------------------------------------
 ARGOCD_NS            ?= argocd
 
@@ -19,12 +12,38 @@ CFG_GIT_TOKEN        ?= $${GIT_PASSWORD}
 CFG_REPO_SSH_URL     ?=   # e.g. git@github.com:org/repo.git
 CFG_GIT_SSH_KEY_FILE ?=   # path to deploy key file
 NAMESPACE            ?= $(ARGOCD_NS)
+# defaults
+CFG_REPO_URL  		?= CFG_GIT_REPO=https://github.com/viaacode/tkn-demo.git
+REMOTE_CFG_DIR          := k8s-resources-remote
+REPO_URL      		?= CFG_GIT_REPO=https://github.com/viaacode/tkn-demo.git
+SVC_PORT      		?= 5000
+IMAGE_NAME    		?= $(shell echo "$(FINAL_NAME)" | sed -E 's@[@].*$$@@; s@:[^/]*$$@@')
+DRY_RUN       		?= --dry-run=client
+APP_NAME                ?= cicd-helloworld-example
+ENV          		?= qas
+NAMESPACE     		?= meemoo-infra
+ENVS          		:= int qas prd
+REGISTRY_HOST 		?= meeregistrymoo.azurecr.io
 
-export NAMESPACE
+FINAL_NAME              ?= $(REGISTRY_HOST)/$(NAMESPACE)/$(APP_NAME):$(ENV)-latest
 
-.PHONY: cfg-bootstrap cfg-sync cfg-push argocd-bootstrap argocd-apply-projects argocd-apply-repo-creds
+
+export ENVS REGISTRY_HOST FINAL_NAME APP_NAME SVC_PORT
+
+.PHONY: cfg-bootstrap cfg-sync cfg-push argocd-setup
+
+.PHONY: all set-ns build-all deploy-all-envs redeploy-all-envs undeploy-all-apps clone_appcode buildi pushi clone_cfg image2acr
+
+all: set-ns clean build-all deploy argocd-setup
+#build-all push_cfg
+
 
 cfg-bootstrap: clone_cfg cfg-sync cfg-push
+
+.PHONY: default bootstrap clean deploy int qas prd
+default: all
+
+# "make APP_NAME=my-app" → bootstrap
 
 # Sync local generated output into the config repo working tree
 cfg-sync:
@@ -38,7 +57,7 @@ cfg-sync:
 	@rsync -va --delete k8s-resources/kustomize/ $(REMOTE_CFG_DIR)/kustomize/
 
 	# argo applications (your generated root/child apps)
-	@rsync -va --delete k8s-resources/argocd/ $(REMOTE_CFG_DIR)/argocd/applications/
+	@rsync -va --delete k8s-resources/argocd/applications/ $(REMOTE_CFG_DIR)/argocd/applications/
 
 	@echo "__done syncing__"
 
@@ -49,33 +68,6 @@ cfg-push:
 	  (git diff --cached --quiet || git commit -m "Auto commit templatar") && \
 	  git push
 
-# --- ArgoCD bootstrap: create repo creds + projects + (optionally) apply root-app
-argocd-bootstrap: set-ns argocd-apply-repo-creds argocd-apply-projects argocd-deploy-root-env
-
-argocd-apply-projects:
-	@echo "__applying ArgoCD projects__"
-	@for e in $(ENVS); do \
-	  ENV=$$e ARGOCD_NS=$(ARGOCD_NS) envsubst < argocd-project-tmpl.yaml | kubectl apply -f - ; \
-	done
-
-argocd-apply-repo-creds:
-	@echo "__applying ArgoCD config-repo credentials (CFG_AUTH=$(CFG_AUTH))__"
-ifeq ($(CFG_AUTH),https)
-	@ARGOCD_NS=$(ARGOCD_NS) CFG_GIT_USERNAME=$(CFG_GIT_USERNAME) CFG_GIT_TOKEN=$(CFG_GIT_TOKEN) envsubst < argocd-repo-https-secret-tmpl.yaml | kubectl apply -f -
-else ifeq ($(CFG_AUTH),ssh)
-	@if [ -z "$(CFG_GIT_SSH_KEY_FILE)" ]; then echo "CFG_GIT_SSH_KEY_FILE is required for CFG_AUTH=ssh"; exit 2; fi
-	@export CFG_GIT_SSH_KEY_INDENTED="$$(sed 's/^/    /' $(CFG_GIT_SSH_KEY_FILE))" ; \
-	ARGOCD_NS=$(ARGOCD_NS) CFG_GIT_SSH_KEY_INDENTED="$$CFG_GIT_SSH_KEY_INDENTED" envsubst < argocd-repo-ssh-secret-tmpl.yaml | kubectl apply -f -
-else
-	@echo "Unknown CFG_AUTH: $(CFG_AUTH) (use https or ssh)"; exit 2
-endif
-
-
-
-
-
-
-
 
 # --- Global settings --------------------------------------------------------
 K8S_CTX ?= aks-qas-auto
@@ -84,23 +76,7 @@ AKS_CTX ?= $(K8S_CTX)
 export K8S_CTX
 export LOCAL_DOMAIN 	:= az-$${ENV}.local
 
-# defaults
-CFG_REPO_URL  		?= https://github.com/viaacode/playground_k8s-resources.git
-REMOTE_CFG_DIR          := k8s-resources-remote
-REPO_URL      		?= https://github.com/viaacode/cicd-helloworld-example.git
-SVC_PORT      		?= 5000
-IMAGE_NAME    		?= $(shell echo "$(FINAL_NAME)" | sed -E 's@[@].*$$@@; s@:[^/]*$$@@')
-DRY_RUN       		?= --dry-run=client
-APP_NAME ?= cicd-helloworld-example
-ENV          		?= qas
-NAMESPACE     		?= meemoo-infra
-ENVS          		:= int qas prd
-REGISTRY_HOST 		?= meeregistrymoo.azurecr.io
 
-FINAL_NAME              ?= $(REGISTRY_HOST)/$(NAMESPACE)/$(APP_NAME):$(ENV)-latest
-
-
-export ENVS REGISTRY_HOST FINAL_NAME APP_NAME SVC_PORT
 #if you have the platform
 #CD
 #ARGOPW        		:= $(shell $(MAKE) -C /opt/cloudmigration/meePlatFormoo/CiCd/ArgoCD/ get-pass |tail -n2|head -n1)
@@ -114,17 +90,14 @@ SUFFIX        		?= $(ENV)
 APPS          		?= $(APP_NAME)
 
 # App Metadata: Port and Source Code Repo, make these for every app in APPS list
-cicd-helloworld-example_PORT      	:= $(SVC_PORT)
-cicd-helloworld-example_REPO      	:= $(REPO_URL)
-cicd-helloworld-example_CFG_REPO       	:= $(CFG_REPO_URL)
+tkn-demo_PORT      	:= $(SVC_PORT)
+tkn-demo_REPO      	:= $(REPO_URL)
+tkn-demo_CFG_REPO      	:= $(CFG_REPO_URL)
 
-
-.PHONY: all set-ns build-all deploy-all-envs redeploy-all-envs undeploy-all-apps clone_appcode buildi pushi clone_cfg image2acr argocd_password
-all: set-ns build-all push_cfg
 
 
 # Use this to push the image to azure registry
-image2acr: clone buildi pushi
+image2acr: clone_appcode buildi pushi
 
 set-ns:
 	@kubectl config use-context $(K8S_CTX)
@@ -138,7 +111,7 @@ clone_appcode:
 	@git clone $(REPO_URL) $(APP_NAME) || true
 
 
-clone_cfg: build-all
+clone_cfg:
 	@rm -rf $(REMOTE_CFG_DIR) 2>/dev/null || true
 	@git clone $(CFG_REPO_URL) $(REMOTE_CFG_DIR) || true
 
@@ -161,6 +134,11 @@ push_cfg: build_cfg
 
 
 
+argocd-setup: set-ns
+	$(MAKE) -C ArgoCD argocd-bootstrap argocd-apply-projects argocd-apply-repo-creds
+
+
+
 # Example: Run templator and kustomize build for every app
 build-all: set-ns
 	@$(foreach app, $(APPS), \
@@ -173,7 +151,6 @@ build-all: set-ns
 		$(MAKE) deploy-all-envs APP_NAME=$(app) SVC_PORT=$($(app)_PORT) REPO_URL=$($(app)_CFG_REPO); \
 	)
 	$(MAKE) create_structure
-	$(MAKE) generate-argocd
 	@echo "All resources generated in k8s-resources/"
 	tree k8s-resources
 
@@ -193,21 +170,6 @@ undeploy-all-apps: set-ns
                 APP_NAME=$$e $(MAKE) undeploy; \
         done
 
-.PHONY: generate-argocd argocd-deploy-root
-# This target generates the ArgoCD manifests for each app/env
-generate-argocd:
-	@echo "__creating ArgoCD manifests__"
-	@mkdir -p k8s-resources/argocd/int k8s-resources/argocd/qas k8s-resources/argocd/prd
-	@$(foreach env, $(ENVS), \
-		ENV=$(env) envsubst < argocd-root-tmpl.yaml > k8s-resources/argocd/$(env)/root-app.yaml; \
-		$(foreach app, $(APPS), \
-			APP_NAME=$(app) ENV=$(env) envsubst < argocd-child-tmpl.yaml > k8s-resources/argocd/$(env)/$(app)-$(env).yaml; \
-		) \
-	)
-
-argocd-deploy-root-env: set-ns generate-argocd
-	 kubectl apply -f k8s-resources/argocd/$(ENV)/root-app.yaml
-
 create_structure:
 	  @$(foreach app, $(APPS), \
                 echo "Building $(app)..."; \
@@ -217,10 +179,7 @@ create_structure:
 
 export APP_NAME ENV FINAL_NAME NAMESPACE PREFIX SUFFIX CFG_REPO_URL
 
-.PHONY: default bootstrap clean deploy int qas prd
 
-# "make APP_NAME=my-app" → bootstrap
-default: bootstrap kustomize_image
 
 debug:
 	echo $(IMAGE_NAME)
@@ -304,21 +263,21 @@ undeploy: set-ns
 ## K8S_CTX is important each env is in other cluster so set context !
 int: ENV=int
 int: K8S_CTX=aks-tst
-int: set-ns build-all lint argocd-deploy-root-env
+int: set-ns
+	$(MAKE) -C ArgoCD generate-argocd argocd-deploy-root-env deploy_app
 
 
 
 #######################
 qas: ENV=qas
 qas: K8S_CTX=aks-qas-auto
-qas: set-ns build-all kustomize_image lint argocd-deploy-root-env
+qas: set-ns build-all kustomize_image lint
 
 #############
-#qas: set-ns clean build-all lint argocd-deploy-root-env
 
 prd: ENV=prd
 int: K8S_CTX=aks-tst
-prd: set-ns build-all lint argocd-deploy-root-env
+prd: set-ns build-all lint -env
 
 
 

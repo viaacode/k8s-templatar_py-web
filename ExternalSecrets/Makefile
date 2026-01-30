@@ -38,7 +38,7 @@ install:
 add_secret_store: setctx
 	#cat secretstore-tmpl.yaml | envsubst | tee  external-secret-store-$(NAMESPACE).yaml
 	envsubst < secretstore-hashicloud-tmpl.yaml > external-secret-store-$(NAMESPACE).yaml
-	kubectl replace -f external-secret-store-$(NAMESPACE).yaml
+	kubectl replace -f external-secret-store-$(NAMESPACE).yaml || kubectl apply -f external-secret-store-$(NAMESPACE).yaml
 
 
 test:
